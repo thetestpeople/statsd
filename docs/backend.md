@@ -33,8 +33,10 @@ queues and third-party services.
 ## Available Third-party backends
 - [amqp-backend](https://github.com/mrtazz/statsd-amqp-backend)
 - [datadog-backend](https://github.com/DataDog/statsd-datadog-backend)
+- [elasticsearch-backend](https://github.com/markkimsal/statsd-elasticsearch-backend)
 - [ganglia-backend](https://github.com/jbuchbinder/statsd-ganglia-backend)
 - [hosted graphite backend](https://github.com/hostedgraphite/statsdplugin)
+- [influxdb backend](https://github.com/bernd/statsd-influxdb-backend)
 - [instrumental backend](https://github.com/collectiveidea/statsd-instrumental-backend)
 - [leftronic backend](https://github.com/sreuter/statsd-leftronic-backend)
 - [librato-backend](https://github.com/librato/statsd-librato-backend)

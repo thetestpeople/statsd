@@ -28,12 +28,12 @@ var flush_counts;
 
 // prefix configuration
 var globalPrefix;
-var prefixPersecond;
 var prefixCounter;
 var prefixTimer;
 var prefixGauge;
 var prefixSet;
 var globalSuffix;
+var prefixStats;
 
 // set up namespaces
 var legacyNamespace  = true;
@@ -219,6 +219,7 @@ exports.init = function graphite_init(startup_time, config, events, logger) {
   prefixSet       = config.graphite.prefixSet;
   globalSuffix    = config.graphite.globalSuffix;
   legacyNamespace = config.graphite.legacyNamespace;
+  prefixStats     = config.prefixStats;
 
   // set defaults for prefixes & suffix
   globalPrefix  = globalPrefix !== undefined ? globalPrefix : "stats";
@@ -226,6 +227,7 @@ exports.init = function graphite_init(startup_time, config, events, logger) {
   prefixTimer   = prefixTimer !== undefined ? prefixTimer : "timers";
   prefixGauge   = prefixGauge !== undefined ? prefixGauge : "gauges";
   prefixSet     = prefixSet !== undefined ? prefixSet : "sets";
+  prefixStats   = prefixStats !== undefined ? prefixStats : "statsd";
   legacyNamespace = legacyNamespace !== undefined ? legacyNamespace : true;
 
   // In order to unconditionally add this string, it either needs to be

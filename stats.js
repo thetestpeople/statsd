@@ -1,7 +1,6 @@
 /*jshint node:true, laxcomma:true */
 
-var dgram  = require('dgram')
-  , util    = require('util')
+var util    = require('util')
   , net    = require('net')
   , config = require('./lib/config')
   , helpers = require('./lib/helpers')
@@ -24,7 +23,7 @@ var sets = {};
 var counter_rates = {};
 var timer_data = {};
 var pctThreshold = null;
-var flushInterval, keyFlushInt, server, mgmtServer;
+var flushInterval, keyFlushInt, serverLoaded, mgmtServer;
 var startup_time = Math.round(new Date().getTime() / 1000);
 var backendEvents = new events.EventEmitter();
 var healthStatus = config.healthStatus || 'up';
@@ -42,6 +41,25 @@ function loadBackend(config, name) {
   var ret = backendmod.init(startup_time, config, backendEvents, l);
   if (!ret) {
     l.log("Failed to load backend: " + name);
+    process.exit(1);
+  }
+}
+
+// Load and init the server from the servers/ directory.
+// The callback mimics the dgram 'message' event parameters (msg, rinfo)
+//   msg: the message received by the server. may contain more than one metric
+//   rinfo: contains remote address information and message length
+//      (attributes are .address, .port, .family, .size - you're welcome)
+function startServer(config, name, callback) {
+  var servermod = require(name);
+
+  if (config.debug) {
+    l.log("Loading server: " + name, 'DEBUG');
+  }
+
+  var ret = servermod.start(config, callback);
+  if (!ret) {
+    l.log("Failed to load server: " + name);
     process.exit(1);
   }
 }
@@ -86,7 +104,9 @@ function flushMetrics() {
     conf.deleteCounters = conf.deleteCounters || false;
     for (var counter_key in metrics.counters) {
       if (conf.deleteCounters) {
-        if ((counter_key.indexOf("packets_received") != -1) || (counter_key.indexOf("bad_lines_seen") != -1)) {
+        if ((counter_key.indexOf("packets_received") != -1) ||
+            (counter_key.indexOf("metrics_received") != -1) ||
+            (counter_key.indexOf("bad_lines_seen") != -1)) {
           metrics.counters[counter_key] = 0;
         } else {
          delete(metrics.counters[counter_key]);
@@ -143,7 +163,7 @@ var stats = {
 // Global for the logger
 var l;
 
-config.configFile(process.argv[2], function (config, oldConfig) {
+config.configFile(process.argv[2], function (config) {
   conf = config;
 
   process_mgmt.init(config);
@@ -151,24 +171,27 @@ config.configFile(process.argv[2], function (config, oldConfig) {
   l = new logger.Logger(config.log || {});
 
   // setup config for stats prefix
-  prefixStats = config.prefixStats;
+  var prefixStats = config.prefixStats;
   prefixStats = prefixStats !== undefined ? prefixStats : "statsd";
   //setup the names for the stats stored in counters{}
   bad_lines_seen   = prefixStats + ".bad_lines_seen";
   packets_received = prefixStats + ".packets_received";
+  metrics_received = prefixStats + ".metrics_received";
   timestamp_lag_namespace = prefixStats + ".timestamp_lag";
 
   //now set to zero so we can increment them
   counters[bad_lines_seen]   = 0;
   counters[packets_received] = 0;
+  counters[metrics_received] = 0;
 
-  if (server === undefined) {
+  if (!serverLoaded) {
 
     // key counting
     var keyFlushInterval = Number((config.keyFlush && config.keyFlush.interval) || 0);
 
-    var udp_version = config.address_ipv6 ? 'udp6' : 'udp4';
-    server = dgram.createSocket(udp_version, function (msg, rinfo) {
+    // The default server is UDP
+    var server = config.server || './servers/udp'
+    serverLoaded = startServer(config, server, function (msg, rinfo) {
       backendEvents.emit('packet', msg, rinfo);
       counters[packets_received]++;
       var packet_data = msg.toString();
@@ -182,6 +205,8 @@ config.configFile(process.argv[2], function (config, oldConfig) {
         if (metrics[midx].length === 0) {
           continue;
         }
+
+        counters[metrics_received]++;
         if (config.dumpMessages) {
           l.log(metrics[midx].toString());
         }
@@ -259,7 +284,27 @@ config.configFile(process.argv[2], function (config, oldConfig) {
 
         switch(cmd) {
           case "help":
-            stream.write("Commands: stats, counters, timers, gauges, delcounters, deltimers, delgauges, health, quit\n\n");
+            stream.write("Commands: stats, counters, timers, gauges, delcounters, deltimers, delgauges, health, config, quit\n\n");
+            break;
+
+          case "config":
+            stream.write("\n");
+            for (var prop in config) {
+              if (!config.hasOwnProperty(prop)) {
+                continue;
+              }
+              if (typeof config[prop] !== 'object') {
+                stream.write(prop + ": " + config[prop] + "\n");
+                continue;
+              }
+              subconfig = config[prop];
+              for (var subprop in subconfig) {
+                if (!subconfig.hasOwnProperty(subprop)) {
+                  continue;
+                }
+                stream.write(prop + " > " + subprop + ": " + subconfig[subprop] + "\n");
+              }
+            }
             break;
 
           case "health":
@@ -355,7 +400,6 @@ config.configFile(process.argv[2], function (config, oldConfig) {
       });
     });
 
-    server.bind(config.port || 8125, config.address || undefined);
     mgmtServer.listen(config.mgmt_port || 8126, config.mgmt_address || undefined);
 
     util.log("server is up");
