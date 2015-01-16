@@ -15,6 +15,7 @@
  */
 
 var net = require('net');
+var fs = require('fs');
 
 // this will be instantiated to the logger
 var l;
@@ -42,9 +43,11 @@ var timerNamespace   = [];
 var gaugesNamespace  = [];
 var setsNamespace    = [];
 
+// 
+
 var graphiteStats = {};
 
-var post_stats = function graphite_post_stats(statString) {
+var post_stats = function graphite_post_stats(statString,retries) {
   var last_flush = graphiteStats.last_flush || 0;
   var last_exception = graphiteStats.last_exception || 0;
   var flush_time = graphiteStats.flush_time || 0;
@@ -53,9 +56,22 @@ var post_stats = function graphite_post_stats(statString) {
     try {
       var graphite = net.createConnection(graphitePort, graphiteHost);
       graphite.addListener('error', function(connectionException){
-        if (debug) {
-          l.log(connectionException);
-        }
+	    l.log("Exception caught in listener");
+        l.log("Retries left: " + retries);
+        l.log(connectionException);
+        if (retries > 0) {
+          retries -= 1;
+          setTimeout(post_stats, 1000, statString, retries);
+        } else {
+          l.log("No retries left, data failed to send");
+          fs.appendFile("failedData.csv", statString, function(err) {
+            if(err) {
+                console.log(err);
+            } else {
+                console.log("Failed metrics saved to failedData.csv");
+            }
+          }); 
+      }
       });
       graphite.on('connect', function() {
         var ts = Math.round(new Date().getTime() / 1000);
@@ -74,10 +90,23 @@ var post_stats = function graphite_post_stats(statString) {
         graphiteStats.last_flush = Math.round(new Date().getTime() / 1000);
       });
     } catch(e){
-      if (debug) {
-        l.log(e);
+	  l.log("Sending exception");
+      l.log("Retries left: " + retries);
+      l.log(e);
+      graphiteStats.last_exception = Math.round(new Date().getTime() / 1000);      
+      if (retries > 0) {
+          retries -= 1;
+          setTimeout(post_stats,1000,statString,retries);
+      } else {
+        l.log("No retries left, data failed to send");
+        fs.appendFile("failedData.csv", statString, function(err) {
+          if(err) {
+              console.log(err);
+          } else {
+              console.log("Failed metrics saved to failedData.csv");
+          }
+        }); 
       }
-      graphiteStats.last_exception = Math.round(new Date().getTime() / 1000);
     }
   }
 };
@@ -96,6 +125,7 @@ var flush_stats = function graphite_flush(ts, metrics) {
   var counter_rates = metrics.counter_rates;
   var timer_data = metrics.timer_data;
   var statsd_metrics = metrics.statsd_metrics;
+  var retries = 3;
 
   for (key in counters) {
     var namespace = counterNamespace.concat(key);
@@ -163,7 +193,7 @@ var flush_stats = function graphite_flush(ts, metrics) {
       statString += the_key.join(".") + globalSuffix + statsd_metrics[key] + ts_suffix;
     }
   }
-  post_stats(statString);
+  post_stats(statString,retries);
 
   if (debug) {
    l.log("numStats: " + numStats);
